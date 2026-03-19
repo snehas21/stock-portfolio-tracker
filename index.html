@@ -786,6 +786,11 @@
     const unique = [...new Set(tickers.map(t => t.toUpperCase()))];
     const symbols = encodeURIComponent(unique.join(','));
     const yUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&fields=regularMarketPrice,longName,shortName,currency`;
+  async function fetchPrices(tickers) {
+    if (!tickers.length) return {};
+    const unique = [...new Set(tickers.map(t => t.toUpperCase()))];
+    const symbols = encodeURIComponent(unique.join(','));
+    const yUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&fields=regularMarketPrice,longName,shortName,currency`;
     throw new Error(errs.join(' | '));
   }
 
@@ -1157,8 +1162,8 @@
     const label    = document.getElementById('f-label').value.trim();
 
     if (!ticker) { showErr('Ticker symbol is required.'); return; }
-    if (!shares || shares <= 0) { showErr('Shares must be a positive number.'); return; }
-    if (!avgPrice || avgPrice < 0) { showErr('Avg. buy price must be a non-negative number.'); return; }
+    if (!Number.isFinite(shares) || shares <= 0) { showErr('Shares must be a positive number.'); return; }
+    if (!Number.isFinite(avgPrice) || avgPrice < 0) { showErr('Avg. buy price must be a non-negative number.'); return; }
 
     addOrUpdate({ ticker, shares, avgPrice, label });
     closeModal();
