@@ -680,6 +680,7 @@
     for (const a of attempts) {
       try {
         const resp = await fetchWithTimeout(a.url, 15000);
+        const resp = await fetch(a.url, { signal: AbortSignal.timeout(15000) });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await a.parse(resp);
         if (!data?.quoteResponse?.result) throw new Error('Missing quoteResponse.result');
@@ -780,6 +781,23 @@
     const unique = [...new Set(tickers.map(t => t.toUpperCase()))];
     const symbols = encodeURIComponent(unique.join(','));
     const yUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&fields=regularMarketPrice,longName,shortName,currency`;
+  async function fetchPrices(tickers) {
+    if (!tickers.length) return {};
+    const unique = [...new Set(tickers.map(t => t.toUpperCase()))];
+    const symbols = encodeURIComponent(unique.join(','));
+    const yUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&fields=regularMarketPrice,longName,shortName,currency`;
+  async function fetchPrices(tickers) {
+    if (!tickers.length) return {};
+    const unique = [...new Set(tickers.map(t => t.toUpperCase()))];
+    const symbols = encodeURIComponent(unique.join(','));
+    const yUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&fields=regularMarketPrice,longName,shortName,currency`;
+    throw new Error(errs.join(' | '));
+  }
+
+  async function fetchPrices(tickers) {
+    if (!tickers.length) return {};
+    const unique = [...new Set(tickers.map(t => t.toUpperCase()))];
+    const yUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${unique.join(',')}&fields=regularMarketPrice,longName,shortName,currency`;
     const data = await fetchJsonThroughProxies(yUrl);
     const results = data?.quoteResponse?.result || [];
     const map = {};
