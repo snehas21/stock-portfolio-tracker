@@ -584,16 +584,6 @@
   function pnlSign(n)  { return n >= 0 ? '+' : ''; }
 
   /* ── Yahoo Finance price fetch ────────────────────── */
-  async function fetchWithTimeout(url, ms = 15000) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), ms);
-    try {
-      return await fetch(url, { signal: controller.signal });
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
   async function fetchJsonThroughProxies(yahooUrl) {
     const attempts = [
       {
@@ -621,7 +611,7 @@
 
     for (const a of attempts) {
       try {
-        const resp = await fetchWithTimeout(a.url, 15000);
+        const resp = await fetch(a.url, { signal: AbortSignal.timeout(15000) });
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await a.parse(resp);
         if (!data?.quoteResponse?.result) throw new Error('Missing quoteResponse.result');
