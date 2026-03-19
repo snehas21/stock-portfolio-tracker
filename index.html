@@ -293,6 +293,54 @@
   .empty-title { font-size: 16px; font-weight: 600; color: var(--fg); margin-bottom: 6px; }
   .empty-sub { font-size: 13px; }
 
+  /* ── News panel ───────────────────────────────────── */
+  .news-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 16px 16px 0;
+  }
+  .news-tab {
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--muted-light);
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .news-tab.active {
+    color: #fff;
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+  .news-list {
+    list-style: none;
+    padding: 14px 16px 20px;
+    display: grid;
+    gap: 10px;
+  }
+  .news-item {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    background: #fff;
+  }
+  .news-link {
+    color: var(--fg);
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    line-height: 1.35;
+  }
+  .news-link:hover { color: var(--accent); }
+  .news-meta {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
   /* ── Error banner ────────────────────────────────── */
   .price-error {
     background: rgba(239,68,68,.07);
@@ -510,6 +558,14 @@
       </tbody>
     </table>
   </div>
+
+  <div class="section-header" style="margin-top:24px">
+    <span class="section-label">Latest Ticker News</span>
+    <span class="section-divider"></span>
+  </div>
+  <div class="table-wrap" id="news-wrap">
+    <div id="news-root" class="empty-state" style="padding:24px"></div>
+  </div>
 </main>
 
 <footer>
@@ -569,6 +625,8 @@
 
   let holdings = load();   // [{ id, ticker, label, shares, avgPrice }]
   let prices   = {};       // ticker -> { price, name, currency }
+  let newsByTicker = {};   // ticker -> { state, items, error }
+  let activeNewsTicker = null;
   let editId   = null;
 
   /* ── Formatting ───────────────────────────────────── */
@@ -643,6 +701,41 @@
     throw new Error(errs.join(' | '));
   }
 
+  async function fetchTextThroughProxies(url) {
+    const attempts = [
+      {
+        name: 'AllOrigins raw',
+        url: `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+        parse: async (resp) => resp.text(),
+      },
+      {
+        name: 'AllOrigins get',
+        url: `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+        parse: async (resp) => {
+          const outer = await resp.json();
+          if (!outer.contents) throw new Error('Empty proxy response');
+          return outer.contents;
+        },
+      },
+      {
+        name: 'corsproxy.io',
+        url: `https://corsproxy.io/?${encodeURIComponent(url)}`,
+        parse: async (resp) => resp.text(),
+      },
+    ];
+    const errs = [];
+    for (const a of attempts) {
+      try {
+        const resp = await fetchWithTimeout(a.url, 15000);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        return await a.parse(resp);
+      } catch (e) {
+        errs.push(`${a.name}: ${e.message}`);
+      }
+    }
+    throw new Error(errs.join(' | '));
+  }
+
   function fetchYahooViaJsonp(yahooUrl, timeoutMs = 15000) {
     return new Promise((resolve, reject) => {
       const cb = `__yfcb_${Date.now()}_${Math.random().toString(36).slice(2)}`;
@@ -688,6 +781,11 @@
     const unique = [...new Set(tickers.map(t => t.toUpperCase()))];
     const symbols = encodeURIComponent(unique.join(','));
     const yUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&fields=regularMarketPrice,longName,shortName,currency`;
+  async function fetchPrices(tickers) {
+    if (!tickers.length) return {};
+    const unique = [...new Set(tickers.map(t => t.toUpperCase()))];
+    const symbols = encodeURIComponent(unique.join(','));
+    const yUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&fields=regularMarketPrice,longName,shortName,currency`;
     throw new Error(errs.join(' | '));
   }
 
@@ -706,6 +804,23 @@
       };
     });
     return map;
+  }
+
+  async function fetchTickerNews(ticker) {
+    const rssUrl = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(ticker)}&region=US&lang=en-US`;
+    const xmlText = await fetchTextThroughProxies(rssUrl);
+    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    if (doc.querySelector('parsererror')) throw new Error('Could not parse Yahoo news feed');
+
+    return [...doc.querySelectorAll('item')]
+      .slice(0, 5)
+      .map(item => ({
+        title: item.querySelector('title')?.textContent?.trim() || 'Untitled',
+        link: item.querySelector('link')?.textContent?.trim() || '#',
+        pubDate: item.querySelector('pubDate')?.textContent?.trim() || '',
+        source: item.querySelector('source')?.textContent?.trim() || 'Yahoo Finance',
+      }))
+      .filter(x => x.link && x.link !== '#');
   }
 
   /* ── Render summary ───────────────────────────────── */
@@ -849,6 +964,74 @@
     });
   }
 
+  function renderNews() {
+    const newsRoot = document.getElementById('news-root');
+    const tickers = [...new Set(holdings.map(h => h.ticker.toUpperCase()))];
+
+    if (!tickers.length) {
+      newsRoot.className = 'empty-state';
+      newsRoot.innerHTML = `
+        <div class="empty-icon">📰</div>
+        <div class="empty-title">No ticker news yet</div>
+        <div class="empty-sub">Add a holding to view latest headlines.</div>`;
+      return;
+    }
+
+    if (!activeNewsTicker || !tickers.includes(activeNewsTicker)) activeNewsTicker = tickers[0];
+    const state = newsByTicker[activeNewsTicker];
+    const tabsHtml = tickers.map(t =>
+      `<button class="news-tab ${t === activeNewsTicker ? 'active' : ''}" data-ticker="${t}">${escHtml(t)}</button>`
+    ).join('');
+
+    let bodyHtml = '';
+    if (!state || state.state === 'loading') {
+      bodyHtml = `<div class="empty-state" style="padding:20px"><span class="badge-loading">Loading latest headlines…</span></div>`;
+    } else if (state.state === 'error') {
+      bodyHtml = `<div class="empty-state" style="padding:20px">
+        <div class="empty-title">Could not load news for ${escHtml(activeNewsTicker)}</div>
+        <div class="empty-sub">${escHtml(state.error || 'Unknown error')}</div>
+      </div>`;
+    } else if (!state.items.length) {
+      bodyHtml = `<div class="empty-state" style="padding:20px">
+        <div class="empty-title">No recent news found for ${escHtml(activeNewsTicker)}</div>
+      </div>`;
+    } else {
+      bodyHtml = `<ul class="news-list">${state.items.map(n => `
+        <li class="news-item">
+          <a class="news-link" href="${escHtml(n.link)}" target="_blank" rel="noopener">${escHtml(n.title)}</a>
+          <div class="news-meta">${escHtml(n.source)}${n.pubDate ? ' · ' + escHtml(new Date(n.pubDate).toLocaleString()) : ''}</div>
+        </li>`).join('')}</ul>`;
+    }
+
+    newsRoot.className = '';
+    newsRoot.innerHTML = `<div class="news-tabs">${tabsHtml}</div>${bodyHtml}`;
+    newsRoot.querySelectorAll('.news-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const t = btn.dataset.ticker;
+        if (!t || t === activeNewsTicker) return;
+        activeNewsTicker = t;
+        renderNews();
+        loadNewsForTicker(t);
+      });
+    });
+  }
+
+  async function loadNewsForTicker(ticker) {
+    if (!ticker) return;
+    const existing = newsByTicker[ticker];
+    if (existing && (existing.state === 'ok' || existing.state === 'loading')) return;
+    newsByTicker[ticker] = { state: 'loading', items: [] };
+    if (activeNewsTicker === ticker) renderNews();
+
+    try {
+      const items = await fetchTickerNews(ticker);
+      newsByTicker[ticker] = { state: 'ok', items };
+    } catch (e) {
+      newsByTicker[ticker] = { state: 'error', items: [], error: e.message };
+    }
+    if (activeNewsTicker === ticker) renderNews();
+  }
+
   function cell(text) {
     const td = document.createElement('td');
     td.style.textAlign = 'right';
@@ -904,10 +1087,20 @@
   }
 
   function removeHolding(id) {
+    const removed = holdings.find(h => h.id === id);
     holdings = holdings.filter(h => h.id !== id);
     save(holdings);
+    if (removed) {
+      const sym = removed.ticker.toUpperCase();
+      const stillUsed = holdings.some(h => h.ticker.toUpperCase() === sym);
+      if (!stillUsed) {
+        delete newsByTicker[sym];
+        if (activeNewsTicker === sym) activeNewsTicker = null;
+      }
+    }
     renderTable();
     renderSummary();
+    renderNews();
   }
 
   /* ── Modal ────────────────────────────────────────── */
@@ -973,6 +1166,8 @@
     // Re-render immediately with existing prices, then fetch new ones
     renderTable();
     renderSummary();
+    renderNews();
+    loadNewsForTicker(ticker);
     await refreshPrices();
   });
 
@@ -987,6 +1182,8 @@
   /* ── Init ─────────────────────────────────────────── */
   renderTable();
   renderSummary();
+  renderNews();
+  if (holdings.length) loadNewsForTicker(holdings[0].ticker.toUpperCase());
   if (holdings.length) refreshPrices();
 })();
 </script>
