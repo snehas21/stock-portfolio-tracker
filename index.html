@@ -584,16 +584,110 @@
   function pnlSign(n)  { return n >= 0 ? '+' : ''; }
 
   /* ── Yahoo Finance price fetch ────────────────────── */
+  async function fetchWithTimeout(url, ms = 15000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+      return await fetch(url, { signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function fetchJsonThroughProxies(yahooUrl) {
+    const attempts = [
+      {
+        name: 'AllOrigins raw',
+        url: `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`,
+        parse: async (resp) => resp.json(),
+      },
+      {
+        name: 'AllOrigins get',
+        url: `https://api.allorigins.win/get?url=${encodeURIComponent(yahooUrl)}`,
+        parse: async (resp) => {
+          const outer = await resp.json();
+          if (!outer.contents) throw new Error('Empty proxy response');
+          return JSON.parse(outer.contents);
+        },
+      },
+      {
+        name: 'corsproxy.io',
+        url: `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`,
+        parse: async (resp) => resp.json(),
+      },
+    ];
+
+    const errs = [];
+
+    for (const a of attempts) {
+      try {
+        const resp = await fetchWithTimeout(a.url, 15000);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await a.parse(resp);
+        if (!data?.quoteResponse?.result) throw new Error('Missing quoteResponse.result');
+        return data;
+      } catch (e) {
+        errs.push(`${a.name}: ${e.message}`);
+      }
+    }
+
+    // Final fallback for environments where CORS/proxies fail:
+    // Yahoo JSONP via <script> (no fetch/CORS requirement).
+    try {
+      return await fetchYahooViaJsonp(yahooUrl, 15000);
+    } catch (e) {
+      errs.push(`Yahoo JSONP: ${e.message}`);
+    }
+
+    throw new Error(errs.join(' | '));
+  }
+
+  function fetchYahooViaJsonp(yahooUrl, timeoutMs = 15000) {
+    return new Promise((resolve, reject) => {
+      const cb = `__yfcb_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      const sep = yahooUrl.includes('?') ? '&' : '?';
+      const src = `${yahooUrl}${sep}callback=${cb}`;
+      const script = document.createElement('script');
+
+      let done = false;
+      const cleanup = () => {
+        if (script.parentNode) script.parentNode.removeChild(script);
+        try { delete window[cb]; } catch { window[cb] = undefined; }
+      };
+      const fail = (msg) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        cleanup();
+        reject(new Error(msg));
+      };
+      const ok = (data) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        cleanup();
+        if (!data?.quoteResponse?.result) {
+          reject(new Error('Missing quoteResponse.result'));
+          return;
+        }
+        resolve(data);
+      };
+
+      const timer = setTimeout(() => fail('Timed out'), timeoutMs);
+      window[cb] = ok;
+      script.async = true;
+      script.onerror = () => fail('Script load error');
+      script.src = src;
+      document.head.appendChild(script);
+    });
+  }
+
   async function fetchPrices(tickers) {
     if (!tickers.length) return {};
     const unique = [...new Set(tickers.map(t => t.toUpperCase()))];
-    const yUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${unique.join(',')}&fields=regularMarketPrice,longName,shortName,currency`;
-    const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(yUrl)}`;
-    const resp = await fetch(proxy, { signal: AbortSignal.timeout(15000) });
-    if (!resp.ok) throw new Error(`Proxy error ${resp.status}`);
-    const outer = await resp.json();
-    if (!outer.contents) throw new Error('Empty proxy response');
-    const data = JSON.parse(outer.contents);
+    const symbols = encodeURIComponent(unique.join(','));
+    const yUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&fields=regularMarketPrice,longName,shortName,currency`;
+    const data = await fetchJsonThroughProxies(yUrl);
     const results = data?.quoteResponse?.result || [];
     const map = {};
     results.forEach(q => {
