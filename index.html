@@ -806,7 +806,20 @@
     }));
   }
 
-  /* ── Render summary ───────────────────────────────── */
+  /* ── Finnhub company profile (for display name) ───── */
+  async function fetchCompanyName(ticker) {
+    const apiKey = getApiKey();
+    if (!apiKey) return null;
+    const resp = await fetch(
+      `https://finnhub.io/api/v1/stock/profile2?symbol=${encodeURIComponent(ticker)}&token=${apiKey}`,
+      { signal: AbortSignal.timeout(8000) }
+    );
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    return data?.name || null;
+  }
+
+
   function renderSummary() {
     const count = holdings.length;
     let totalInvested = 0, totalValue = 0, hasPrices = false;
@@ -1155,36 +1168,47 @@
     navNewsLink.style.display = '';
 
     const titleEl   = document.getElementById('news-ticker-title');
+    const subEl     = document.getElementById('news-ticker-sub');
     const contentEl = document.getElementById('news-content');
 
-    const p = prices[ticker];
-    const name = p?.name || ticker;
-    titleEl.textContent = `${ticker} — ${name}`;
+    titleEl.textContent = ticker;
+    subEl.textContent   = 'Loading…';
     contentEl.innerHTML = '<div class="news-loading">Fetching latest news…</div>';
 
-    try {
-      const articles = await fetchNews(ticker);
-      if (!articles.length) {
-        contentEl.innerHTML = '<div class="news-error">No news found for this ticker in the last 30 days.</div>';
-        return;
-      }
-      contentEl.innerHTML = articles.map(a => {
-        const date = a.pubDate ? new Date(a.pubDate).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '';
-        const meta = [a.source, date].filter(Boolean).join(' · ');
-        const desc = a.description ? `<div class="news-item-desc">${escHtml(a.description.slice(0, 220))}…</div>` : '';
-        return `<div class="news-item">
-          <a class="news-item-title" href="${escHtml(a.link)}" target="_blank" rel="noopener noreferrer">${escHtml(a.title)}</a>
-          ${desc}
-          <div class="news-item-meta">${escHtml(meta)}</div>
-        </div>`;
-      }).join('');
-    } catch (e) {
-      if (e.message === 'no-key') {
-        contentEl.innerHTML = '<div class="news-error">Configure your Finnhub API key first (go back to the portfolio page).</div>';
-      } else {
-        contentEl.innerHTML = `<div class="news-error">Could not load news: ${escHtml(e.message)}</div>`;
-      }
+    // Fetch company name + news in parallel
+    const [nameResult, newsResult] = await Promise.allSettled([
+      fetchCompanyName(ticker),
+      fetchNews(ticker),
+    ]);
+
+    // Show company name so it's clear whose news this is
+    const companyName = nameResult.status === 'fulfilled' ? nameResult.value : null;
+    titleEl.textContent = companyName ? `${companyName} (${ticker})` : ticker;
+    subEl.textContent   = 'Latest news · past 30 days';
+
+    if (newsResult.status === 'rejected') {
+      const msg = newsResult.reason?.message;
+      contentEl.innerHTML = msg === 'no-key'
+        ? '<div class="news-error">Set up your Finnhub API key on the portfolio page to load news.</div>'
+        : `<div class="news-error">Could not load news: ${escHtml(msg || 'Unknown error')}</div>`;
+      return;
     }
+
+    const articles = newsResult.value;
+    if (!articles.length) {
+      contentEl.innerHTML = '<div class="news-error">No news found for this ticker in the last 30 days.</div>';
+      return;
+    }
+    contentEl.innerHTML = articles.map(a => {
+      const date = a.pubDate ? new Date(a.pubDate).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '';
+      const meta = [a.source, date].filter(Boolean).join(' · ');
+      const desc = a.description ? `<div class="news-item-desc">${escHtml(a.description.slice(0, 220))}…</div>` : '';
+      return `<div class="news-item">
+        <a class="news-item-title" href="${escHtml(a.link)}" target="_blank" rel="noopener noreferrer">${escHtml(a.title)}</a>
+        ${desc}
+        <div class="news-item-meta">${escHtml(meta)}</div>
+      </div>`;
+    }).join('');
   }
 
   // Back button
