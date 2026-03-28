@@ -307,14 +307,13 @@
 
   /* ── Modal ───────────────────────────────────────── */
   .modal-overlay {
-    display: none; /* hidden by default; JS sets display:flex to open */
+    display: none; /* JS sets display:flex to open */
     position: fixed;
     inset: 0;
     background: rgba(15,23,42,0.45);
     backdrop-filter: blur(4px);
     -webkit-backdrop-filter: blur(4px);
     z-index: 100;
-    display: flex;
     align-items: center;
     justify-content: center;
     padding: 16px;
@@ -440,6 +439,102 @@
   @media (max-width: 480px) {
     .summary-grid { grid-template-columns: 1fr; }
   }
+
+  /* ── Ticker clickable ────────────────────────────── */
+  .ticker-sym-link {
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: .03em;
+    color: var(--accent);
+    cursor: pointer;
+    text-decoration: none;
+    border-bottom: 1px dashed rgba(99,102,241,0.4);
+    transition: color .15s, border-color .15s;
+  }
+  .ticker-sym-link:hover { color: #4f46e5; border-color: #4f46e5; }
+
+  /* ── News view ───────────────────────────────────── */
+  #news-view {
+    display: none;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 24px 80px;
+  }
+  .news-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted-light);
+    cursor: pointer;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-family: inherit;
+    margin-bottom: 24px;
+    transition: color .15s, border-color .15s;
+  }
+  .news-back:hover { color: var(--accent); border-color: var(--accent); }
+  .news-headline {
+    font-size: 22px;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .news-sub {
+    font-size: 13px;
+    color: var(--muted);
+    margin-bottom: 24px;
+  }
+  .news-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .news-item {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.05);
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .news-item:hover { border-color: var(--border-hover); box-shadow: 0 4px 12px rgba(99,102,241,.08); }
+  .news-item-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--fg);
+    text-decoration: none;
+    display: block;
+    margin-bottom: 6px;
+    line-height: 1.45;
+  }
+  .news-item-title:hover { color: var(--accent); }
+  .news-item-meta {
+    font-size: 11px;
+    color: var(--muted);
+  }
+  .news-item-desc {
+    font-size: 12px;
+    color: var(--muted-light);
+    margin-top: 6px;
+    line-height: 1.5;
+  }
+  .news-loading {
+    text-align: center;
+    padding: 60px 24px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .news-error {
+    background: rgba(239,68,68,.07);
+    border: 1px solid rgba(239,68,68,.18);
+    border-radius: 10px;
+    padding: 12px 16px;
+    font-size: 13px;
+    color: var(--red);
+  }
 </style>
 </head>
 <body>
@@ -450,7 +545,7 @@
       <div class="brand-icon">📈</div>
       <h1>My Portfolio</h1>
     </a>
-    <a class="nav-link" href="index.html">← News</a>
+    <a class="nav-link" href="#" id="nav-news-link" style="display:none">← Portfolio</a>
     <div class="header-right">
       <span class="last-updated" id="last-updated"></span>
       <button class="btn-refresh" id="btn-refresh">↻ Refresh Prices</button>
@@ -512,10 +607,19 @@
   </div>
 </main>
 
+<!-- News view (shown when a ticker is clicked) -->
+<div id="news-view">
+  <button class="news-back" id="news-back-btn">← Back to Portfolio</button>
+  <div class="news-headline" id="news-ticker-title"></div>
+  <div class="news-sub" id="news-ticker-sub">Latest news from Yahoo Finance</div>
+  <div id="news-content" class="news-list">
+    <div class="news-loading">Loading news…</div>
+  </div>
+</div>
+
 <footer>
   Prices via <a href="https://finance.yahoo.com" target="_blank" rel="noopener">Yahoo Finance</a> &nbsp;·&nbsp;
-  Data stored locally in your browser &nbsp;·&nbsp;
-  <a href="index.html">Back to News</a>
+  Data stored locally in your browser
 </footer>
 
 <!-- Add / Edit modal -->
@@ -587,23 +691,81 @@
   async function fetchPrices(tickers) {
     if (!tickers.length) return {};
     const unique = [...new Set(tickers.map(t => t.toUpperCase()))];
-    const yUrl = `https://query2.finance.yahoo.com/v7/finance/quote?symbols=${unique.join(',')}&fields=regularMarketPrice,longName,shortName,currency`;
-    const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(yUrl)}`;
-    const resp = await fetch(proxy, { signal: AbortSignal.timeout(15000) });
-    if (!resp.ok) throw new Error(`Proxy error ${resp.status}`);
-    const outer = await resp.json();
-    if (!outer.contents) throw new Error('Empty proxy response');
-    const data = JSON.parse(outer.contents);
-    const results = data?.quoteResponse?.result || [];
-    const map = {};
-    results.forEach(q => {
-      map[q.symbol.toUpperCase()] = {
-        price:    q.regularMarketPrice,
-        name:     q.longName || q.shortName || q.symbol,
-        currency: q.currency || 'USD',
-      };
-    });
-    return map;
+    const yUrl = `https://query1.finance.yahoo.com/v8/finance/quote?symbols=${unique.join(',')}&fields=regularMarketPrice,longName,shortName,currency`;
+
+    // Try multiple proxies in order
+    const proxies = [
+      { url: `https://corsproxy.io/?${encodeURIComponent(yUrl)}`, type: 'direct' },
+      { url: `https://api.allorigins.win/get?url=${encodeURIComponent(yUrl)}`, type: 'allorigins' },
+    ];
+
+    let lastErr;
+    for (const { url, type } of proxies) {
+      try {
+        const resp = await fetch(url, { signal: AbortSignal.timeout(15000) });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        let data;
+        if (type === 'allorigins') {
+          const outer = await resp.json();
+          if (!outer.contents) throw new Error('Empty proxy response');
+          data = JSON.parse(outer.contents);
+        } else {
+          data = await resp.json();
+        }
+        const results = data?.quoteResponse?.result || [];
+        if (!results.length && unique.length > 0) throw new Error('No results returned');
+        const map = {};
+        results.forEach(q => {
+          map[q.symbol.toUpperCase()] = {
+            price:    q.regularMarketPrice,
+            name:     q.longName || q.shortName || q.symbol,
+            currency: q.currency || 'USD',
+          };
+        });
+        return map;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error('All price proxies failed');
+  }
+
+  /* ── Yahoo Finance news fetch ─────────────────────── */
+  async function fetchNews(ticker) {
+    const rssUrl = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(ticker)}&region=US&lang=en-US`;
+    const proxies = [
+      { url: `https://api.allorigins.win/get?url=${encodeURIComponent(rssUrl)}`, type: 'allorigins' },
+      { url: `https://corsproxy.io/?${encodeURIComponent(rssUrl)}`, type: 'direct' },
+    ];
+
+    let lastErr;
+    for (const { url, type } of proxies) {
+      try {
+        const resp = await fetch(url, { signal: AbortSignal.timeout(15000) });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        let xmlText;
+        if (type === 'allorigins') {
+          const outer = await resp.json();
+          if (!outer.contents) throw new Error('Empty proxy response');
+          xmlText = outer.contents;
+        } else {
+          xmlText = await resp.text();
+        }
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(xmlText, 'text/xml');
+        const items = doc.querySelectorAll('item');
+        if (!items.length) throw new Error('No news items in feed');
+        return Array.from(items).slice(0, 15).map(item => ({
+          title:       item.querySelector('title')?.textContent?.trim() || '',
+          link:        item.querySelector('link')?.textContent?.trim() || '',
+          pubDate:     item.querySelector('pubDate')?.textContent?.trim() || '',
+          description: item.querySelector('description')?.textContent?.trim() || '',
+        }));
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error('Could not fetch news');
   }
 
   /* ── Render summary ───────────────────────────────── */
@@ -683,10 +845,10 @@
 
       const tr = document.createElement('tr');
 
-      // Ticker cell
+      // Ticker cell (clickable → news view)
       const tdTicker = document.createElement('td');
       tdTicker.innerHTML = `<div class="ticker-cell">
-        <span class="ticker-sym">${escHtml(sym)}</span>
+        <a class="ticker-sym-link" href="#news/${escHtml(sym)}" data-ticker="${escHtml(sym)}">${escHtml(sym)}</a>
         <span class="ticker-name">${escHtml(nameStr)}</span>
       </div>`;
 
@@ -882,10 +1044,84 @@
   /* ── Refresh button ───────────────────────────────── */
   document.getElementById('btn-refresh').addEventListener('click', refreshPrices);
 
+  /* ── News view ────────────────────────────────────── */
+  const mainEl     = document.querySelector('main');
+  const newsViewEl = document.getElementById('news-view');
+  const navNewsLink = document.getElementById('nav-news-link');
+
+  function showPortfolioView() {
+    mainEl.style.display = '';
+    newsViewEl.style.display = 'none';
+    navNewsLink.style.display = 'none';
+    if (history.pushState) history.pushState('', document.title, window.location.pathname);
+  }
+
+  async function showNewsView(ticker) {
+    mainEl.style.display = 'none';
+    newsViewEl.style.display = 'block';
+    navNewsLink.style.display = '';
+
+    const titleEl   = document.getElementById('news-ticker-title');
+    const contentEl = document.getElementById('news-content');
+
+    const p = prices[ticker];
+    const name = p?.name || ticker;
+    titleEl.textContent = `${ticker} — ${name}`;
+    contentEl.innerHTML = '<div class="news-loading">Fetching latest news…</div>';
+
+    try {
+      const articles = await fetchNews(ticker);
+      if (!articles.length) {
+        contentEl.innerHTML = '<div class="news-error">No news articles found for this ticker.</div>';
+        return;
+      }
+      contentEl.innerHTML = articles.map(a => {
+        const date = a.pubDate ? new Date(a.pubDate).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '';
+        const desc = a.description ? `<div class="news-item-desc">${escHtml(a.description.replace(/<[^>]+>/g, '').slice(0, 200))}…</div>` : '';
+        return `<div class="news-item">
+          <a class="news-item-title" href="${escHtml(a.link)}" target="_blank" rel="noopener noreferrer">${escHtml(a.title)}</a>
+          ${desc}
+          <div class="news-item-meta">${date}</div>
+        </div>`;
+      }).join('');
+    } catch (e) {
+      contentEl.innerHTML = `<div class="news-error">Could not load news: ${escHtml(e.message)}</div>`;
+    }
+  }
+
+  // Back button
+  document.getElementById('news-back-btn').addEventListener('click', showPortfolioView);
+  navNewsLink.addEventListener('click', e => { e.preventDefault(); showPortfolioView(); });
+
+  // Ticker link clicks (event delegation on tbody)
+  document.getElementById('holdings-body').addEventListener('click', e => {
+    const link = e.target.closest('.ticker-sym-link');
+    if (!link) return;
+    e.preventDefault();
+    const ticker = link.dataset.ticker;
+    if (ticker) {
+      window.location.hash = `#news/${ticker}`;
+      showNewsView(ticker);
+    }
+  });
+
+  // Handle hash on load / back navigation
+  function handleHash() {
+    const hash = window.location.hash;
+    const m = hash.match(/^#news\/([^/]+)$/);
+    if (m) {
+      showNewsView(decodeURIComponent(m[1]).toUpperCase());
+    } else {
+      showPortfolioView();
+    }
+  }
+  window.addEventListener('popstate', handleHash);
+
   /* ── Init ─────────────────────────────────────────── */
   renderTable();
   renderSummary();
   if (holdings.length) refreshPrices();
+  handleHash();
 })();
 </script>
 </body>
