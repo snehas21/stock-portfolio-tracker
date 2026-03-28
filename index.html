@@ -797,13 +797,20 @@
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const articles = await resp.json();
     if (!Array.isArray(articles)) throw new Error('Unexpected response from Finnhub');
-    return articles.slice(0, 20).map(a => ({
-      title:       a.headline || '',
-      link:        a.url      || '',
-      pubDate:     a.datetime ? a.datetime * 1000 : null, // unix → ms
-      description: a.summary  || '',
-      source:      a.source   || '',
-    }));
+    const sym = ticker.toUpperCase();
+    return articles
+      .filter(a => {
+        if (!a.related) return true;
+        return a.related.split(',').map(s => s.trim().toUpperCase()).includes(sym);
+      })
+      .slice(0, 20)
+      .map(a => ({
+        title:       a.headline || '',
+        link:        a.url      || '',
+        pubDate:     a.datetime ? a.datetime * 1000 : null, // unix → ms
+        description: a.summary  || '',
+        source:      a.source   || '',
+      }));
   }
 
   /* ── Finnhub company profile (for display name) ───── */
