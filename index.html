@@ -305,6 +305,42 @@
     display: none;
   }
 
+  /* ── API key setup banner ────────────────────────── */
+  .api-setup-banner {
+    display: none;
+    background: rgba(99,102,241,.06);
+    border: 1px solid rgba(99,102,241,.22);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+  }
+  .api-setup-banner p { font-size: 13px; color: var(--muted-light); margin-bottom: 10px; line-height: 1.5; }
+  .api-setup-banner a { color: var(--accent); }
+  .api-setup-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .api-key-input {
+    flex: 1; min-width: 220px;
+    padding: 8px 12px;
+    border: 1.5px solid var(--border);
+    border-radius: 8px;
+    font-family: inherit; font-size: 13px; color: var(--fg);
+    background: #fff; outline: none;
+    transition: border-color .15s;
+  }
+  .api-key-input:focus { border-color: var(--accent); }
+  .api-key-input.input-err { border-color: var(--red); }
+  .btn-save-key {
+    padding: 8px 14px; background: var(--accent); color: #fff;
+    font-family: inherit; font-size: 13px; font-weight: 600;
+    border: none; border-radius: 8px; cursor: pointer; white-space: nowrap;
+  }
+  .btn-save-key:hover { background: #4f46e5; }
+  .btn-clear-key {
+    padding: 8px 10px; background: transparent; color: var(--muted);
+    font-family: inherit; font-size: 12px;
+    border: 1px solid var(--border); border-radius: 8px; cursor: pointer; white-space: nowrap;
+  }
+  .btn-clear-key:hover { color: var(--red); border-color: var(--red); }
+
   /* ── Modal ───────────────────────────────────────── */
   .modal-overlay {
     display: none; /* JS sets display:flex to open */
@@ -578,6 +614,18 @@
 
   <div id="price-error" class="price-error"></div>
 
+  <div id="api-setup-banner" class="api-setup-banner">
+    <p><strong>A free API key is required for live prices.</strong> Yahoo Finance blocks direct browser
+    requests. Get a free key at <a href="https://finnhub.io" target="_blank" rel="noopener">finnhub.io</a>
+    — sign up takes 30 seconds, no credit card needed. Then paste your key below.</p>
+    <div class="api-setup-row">
+      <input class="api-key-input" id="finnhub-key-input" type="text"
+             placeholder="Paste Finnhub API key…" autocomplete="off" spellcheck="false"/>
+      <button class="btn-save-key" id="btn-save-key">Save &amp; Fetch Prices</button>
+      <button class="btn-clear-key" id="btn-clear-key" style="display:none">✕ Clear key</button>
+    </div>
+  </div>
+
   <!-- Holdings section -->
   <div class="section-header">
     <span class="section-label">Holdings</span>
@@ -687,85 +735,75 @@
   function pnlClass(n) { return n >= 0 ? 'pnl-pos' : 'pnl-neg'; }
   function pnlSign(n)  { return n >= 0 ? '+' : ''; }
 
-  /* ── Yahoo Finance price fetch ────────────────────── */
+  /* ── API key helpers ──────────────────────────────── */
+  const FINNHUB_KEY_STORAGE = 'finnhub-api-key';
+  const getApiKey  = () => localStorage.getItem(FINNHUB_KEY_STORAGE) || '';
+  const saveApiKey = k  => localStorage.setItem(FINNHUB_KEY_STORAGE, k.trim());
+  const clearApiKey = () => localStorage.removeItem(FINNHUB_KEY_STORAGE);
+
+  /* ── Finnhub price fetch (has real CORS support) ──── */
   async function fetchPrices(tickers) {
     if (!tickers.length) return {};
     const unique = [...new Set(tickers.map(t => t.toUpperCase()))];
-    const yUrl = `https://query1.finance.yahoo.com/v8/finance/quote?symbols=${unique.join(',')}&fields=regularMarketPrice,longName,shortName,currency`;
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error('no-key');
 
-    // Try multiple proxies in order
-    const proxies = [
-      { url: `https://corsproxy.io/?${encodeURIComponent(yUrl)}`, type: 'direct' },
-      { url: `https://api.allorigins.win/get?url=${encodeURIComponent(yUrl)}`, type: 'allorigins' },
-    ];
+    // Fetch all tickers in parallel; allSettled so one bad symbol doesn't kill the rest
+    const settled = await Promise.allSettled(unique.map(async (sym, i) => {
+      const resp = await fetch(
+        `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(sym)}&token=${apiKey}`,
+        { signal: AbortSignal.timeout(12000) }
+      );
+      if (resp.status === 401 || resp.status === 403) throw new Error('invalid-key');
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      // Finnhub returns all-zeros when symbol is unknown
+      if (!data.c && !data.pc) throw new Error(`unknown-symbol`);
+      return { sym, price: data.c, currency: 'USD' };
+    }));
 
-    let lastErr;
-    for (const { url, type } of proxies) {
-      try {
-        const resp = await fetch(url, { signal: AbortSignal.timeout(15000) });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        let data;
-        if (type === 'allorigins') {
-          const outer = await resp.json();
-          if (!outer.contents) throw new Error('Empty proxy response');
-          data = JSON.parse(outer.contents);
-        } else {
-          data = await resp.json();
-        }
-        const results = data?.quoteResponse?.result || [];
-        if (!results.length && unique.length > 0) throw new Error('No results returned');
-        const map = {};
-        results.forEach(q => {
-          map[q.symbol.toUpperCase()] = {
-            price:    q.regularMarketPrice,
-            name:     q.longName || q.shortName || q.symbol,
-            currency: q.currency || 'USD',
-          };
-        });
-        return map;
-      } catch (e) {
-        lastErr = e;
+    // Propagate auth errors immediately
+    for (const r of settled) {
+      if (r.status === 'rejected' && r.reason?.message === 'invalid-key') {
+        throw new Error('invalid-key');
       }
     }
-    throw lastErr || new Error('All price proxies failed');
+
+    const map = {};
+    let anySuccess = false;
+    settled.forEach((r, i) => {
+      if (r.status === 'fulfilled') {
+        map[r.value.sym] = { price: r.value.price, name: null, currency: 'USD' };
+        anySuccess = true;
+      } else {
+        map[unique[i]] = null; // symbol-level failure → show N/A
+      }
+    });
+
+    if (!anySuccess) throw new Error('No prices returned — check your Finnhub API key');
+    return map;
   }
 
-  /* ── Yahoo Finance news fetch ─────────────────────── */
+  /* ── Finnhub news fetch ───────────────────────────── */
   async function fetchNews(ticker) {
-    const rssUrl = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(ticker)}&region=US&lang=en-US`;
-    const proxies = [
-      { url: `https://api.allorigins.win/get?url=${encodeURIComponent(rssUrl)}`, type: 'allorigins' },
-      { url: `https://corsproxy.io/?${encodeURIComponent(rssUrl)}`, type: 'direct' },
-    ];
-
-    let lastErr;
-    for (const { url, type } of proxies) {
-      try {
-        const resp = await fetch(url, { signal: AbortSignal.timeout(15000) });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        let xmlText;
-        if (type === 'allorigins') {
-          const outer = await resp.json();
-          if (!outer.contents) throw new Error('Empty proxy response');
-          xmlText = outer.contents;
-        } else {
-          xmlText = await resp.text();
-        }
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(xmlText, 'text/xml');
-        const items = doc.querySelectorAll('item');
-        if (!items.length) throw new Error('No news items in feed');
-        return Array.from(items).slice(0, 15).map(item => ({
-          title:       item.querySelector('title')?.textContent?.trim() || '',
-          link:        item.querySelector('link')?.textContent?.trim() || '',
-          pubDate:     item.querySelector('pubDate')?.textContent?.trim() || '',
-          description: item.querySelector('description')?.textContent?.trim() || '',
-        }));
-      } catch (e) {
-        lastErr = e;
-      }
-    }
-    throw lastErr || new Error('Could not fetch news');
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error('no-key');
+    const to   = new Date();
+    const from = new Date(to - 30 * 24 * 60 * 60 * 1000); // last 30 days
+    const fmt  = d => d.toISOString().slice(0, 10);
+    const url  = `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker)}&from=${fmt(from)}&to=${fmt(to)}&token=${apiKey}`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(12000) });
+    if (resp.status === 401 || resp.status === 403) throw new Error('Invalid Finnhub API key');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const articles = await resp.json();
+    if (!Array.isArray(articles)) throw new Error('Unexpected response from Finnhub');
+    return articles.slice(0, 20).map(a => ({
+      title:       a.headline || '',
+      link:        a.url      || '',
+      pubDate:     a.datetime ? a.datetime * 1000 : null, // unix → ms
+      description: a.summary  || '',
+      source:      a.source   || '',
+    }));
   }
 
   /* ── Render summary ───────────────────────────────── */
@@ -925,7 +963,8 @@
     const tickers = holdings.map(h => h.ticker.toUpperCase());
     if (!tickers.length) { renderSummary(); return; }
 
-    const errEl = document.getElementById('price-error');
+    const errEl      = document.getElementById('price-error');
+    const setupBanner = document.getElementById('api-setup-banner');
     const refreshBtn = document.getElementById('btn-refresh');
     refreshBtn.disabled = true;
     refreshBtn.textContent = '↻ Fetching…';
@@ -933,16 +972,26 @@
 
     try {
       const fetched = await fetchPrices(tickers);
-      // Mark tickers with no result as null (not undefined)
       tickers.forEach(t => { if (fetched[t] === undefined) fetched[t] = null; });
       prices = fetched;
-      const now = new Date();
+      setupBanner.style.display = 'none';
       document.getElementById('last-updated').textContent =
-        'Prices as of ' + now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        'Prices as of ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     } catch (e) {
-      errEl.textContent = 'Could not fetch prices: ' + e.message + '. Showing cost basis only.';
-      errEl.style.display = 'block';
       tickers.forEach(t => { prices[t] = prices[t] || null; });
+      if (e.message === 'no-key') {
+        // No API key configured — show setup banner
+        setupBanner.style.display = 'block';
+        syncKeyUI();
+      } else if (e.message === 'invalid-key') {
+        setupBanner.style.display = 'block';
+        syncKeyUI();
+        errEl.textContent = 'Invalid Finnhub API key. Please check and re-enter it.';
+        errEl.style.display = 'block';
+      } else {
+        errEl.textContent = 'Could not fetch prices: ' + e.message;
+        errEl.style.display = 'block';
+      }
     } finally {
       refreshBtn.disabled = false;
       refreshBtn.textContent = '↻ Refresh Prices';
@@ -1041,6 +1090,50 @@
     errEl.style.display = 'block';
   }
 
+  /* ── Finnhub API key UI ───────────────────────────── */
+  function syncKeyUI() {
+    const key     = getApiKey();
+    const input   = document.getElementById('finnhub-key-input');
+    const clearBtn = document.getElementById('btn-clear-key');
+    if (key) {
+      input.value = key.slice(0, 6) + '••••••••••••••••';
+      input.dataset.filled = '1';
+      clearBtn.style.display = '';
+    } else {
+      if (input.dataset.filled) { input.value = ''; delete input.dataset.filled; }
+      clearBtn.style.display = 'none';
+    }
+  }
+
+  document.getElementById('finnhub-key-input').addEventListener('focus', function () {
+    if (this.dataset.filled) { this.value = ''; delete this.dataset.filled; }
+  });
+
+  document.getElementById('btn-save-key').addEventListener('click', async () => {
+    const input = document.getElementById('finnhub-key-input');
+    let key = input.value.trim();
+    if (input.dataset.filled) key = getApiKey(); // unchanged — already saved
+    if (!key || key.length < 8) {
+      input.classList.add('input-err');
+      setTimeout(() => input.classList.remove('input-err'), 1500);
+      return;
+    }
+    saveApiKey(key);
+    syncKeyUI();
+    document.getElementById('price-error').style.display = 'none';
+    await refreshPrices();
+  });
+
+  document.getElementById('btn-clear-key').addEventListener('click', () => {
+    clearApiKey();
+    syncKeyUI();
+    // Reset prices to loading state
+    prices = {};
+    document.getElementById('api-setup-banner').style.display = 'none';
+    renderTable();
+    renderSummary();
+  });
+
   /* ── Refresh button ───────────────────────────────── */
   document.getElementById('btn-refresh').addEventListener('click', refreshPrices);
 
@@ -1072,20 +1165,25 @@
     try {
       const articles = await fetchNews(ticker);
       if (!articles.length) {
-        contentEl.innerHTML = '<div class="news-error">No news articles found for this ticker.</div>';
+        contentEl.innerHTML = '<div class="news-error">No news found for this ticker in the last 30 days.</div>';
         return;
       }
       contentEl.innerHTML = articles.map(a => {
         const date = a.pubDate ? new Date(a.pubDate).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '';
-        const desc = a.description ? `<div class="news-item-desc">${escHtml(a.description.replace(/<[^>]+>/g, '').slice(0, 200))}…</div>` : '';
+        const meta = [a.source, date].filter(Boolean).join(' · ');
+        const desc = a.description ? `<div class="news-item-desc">${escHtml(a.description.slice(0, 220))}…</div>` : '';
         return `<div class="news-item">
           <a class="news-item-title" href="${escHtml(a.link)}" target="_blank" rel="noopener noreferrer">${escHtml(a.title)}</a>
           ${desc}
-          <div class="news-item-meta">${date}</div>
+          <div class="news-item-meta">${escHtml(meta)}</div>
         </div>`;
       }).join('');
     } catch (e) {
-      contentEl.innerHTML = `<div class="news-error">Could not load news: ${escHtml(e.message)}</div>`;
+      if (e.message === 'no-key') {
+        contentEl.innerHTML = '<div class="news-error">Configure your Finnhub API key first (go back to the portfolio page).</div>';
+      } else {
+        contentEl.innerHTML = `<div class="news-error">Could not load news: ${escHtml(e.message)}</div>`;
+      }
     }
   }
 
@@ -1118,6 +1216,7 @@
   window.addEventListener('popstate', handleHash);
 
   /* ── Init ─────────────────────────────────────────── */
+  syncKeyUI();
   renderTable();
   renderSummary();
   if (holdings.length) refreshPrices();
