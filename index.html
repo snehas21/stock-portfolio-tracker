@@ -784,42 +784,26 @@
     return map;
   }
 
-  /* ── Yahoo Finance news fetch ─────────────────────── */
+  /* ── Finnhub news fetch ───────────────────────────── */
   async function fetchNews(ticker) {
-    const rssUrl = `https://feeds.finance.yahoo.com/rss/2.0/headline?s=${encodeURIComponent(ticker)}&region=US&lang=en-US`;
-    const proxies = [
-      { url: `https://api.allorigins.win/get?url=${encodeURIComponent(rssUrl)}`, type: 'allorigins' },
-      { url: `https://corsproxy.io/?${encodeURIComponent(rssUrl)}`, type: 'direct' },
-    ];
-
-    let lastErr;
-    for (const { url, type } of proxies) {
-      try {
-        const resp = await fetch(url, { signal: AbortSignal.timeout(15000) });
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        let xmlText;
-        if (type === 'allorigins') {
-          const outer = await resp.json();
-          if (!outer.contents) throw new Error('Empty proxy response');
-          xmlText = outer.contents;
-        } else {
-          xmlText = await resp.text();
-        }
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(xmlText, 'text/xml');
-        const items = doc.querySelectorAll('item');
-        if (!items.length) throw new Error('No news items in feed');
-        return Array.from(items).slice(0, 15).map(item => ({
-          title:       item.querySelector('title')?.textContent?.trim() || '',
-          link:        item.querySelector('link')?.textContent?.trim() || '',
-          pubDate:     item.querySelector('pubDate')?.textContent?.trim() || '',
-          description: item.querySelector('description')?.textContent?.trim() || '',
-        }));
-      } catch (e) {
-        lastErr = e;
-      }
-    }
-    throw lastErr || new Error('Could not fetch news');
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error('no-key');
+    const to   = new Date();
+    const from = new Date(to - 30 * 24 * 60 * 60 * 1000); // last 30 days
+    const fmt  = d => d.toISOString().slice(0, 10);
+    const url  = `https://finnhub.io/api/v1/company-news?symbol=${encodeURIComponent(ticker)}&from=${fmt(from)}&to=${fmt(to)}&token=${apiKey}`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(12000) });
+    if (resp.status === 401 || resp.status === 403) throw new Error('Invalid Finnhub API key');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const articles = await resp.json();
+    if (!Array.isArray(articles)) throw new Error('Unexpected response from Finnhub');
+    return articles.slice(0, 20).map(a => ({
+      title:       a.headline || '',
+      link:        a.url      || '',
+      pubDate:     a.datetime ? a.datetime * 1000 : null, // unix → ms
+      description: a.summary  || '',
+      source:      a.source   || '',
+    }));
   }
 
   /* ── Render summary ───────────────────────────────── */
@@ -1181,20 +1165,25 @@
     try {
       const articles = await fetchNews(ticker);
       if (!articles.length) {
-        contentEl.innerHTML = '<div class="news-error">No news articles found for this ticker.</div>';
+        contentEl.innerHTML = '<div class="news-error">No news found for this ticker in the last 30 days.</div>';
         return;
       }
       contentEl.innerHTML = articles.map(a => {
         const date = a.pubDate ? new Date(a.pubDate).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '';
-        const desc = a.description ? `<div class="news-item-desc">${escHtml(a.description.replace(/<[^>]+>/g, '').slice(0, 200))}…</div>` : '';
+        const meta = [a.source, date].filter(Boolean).join(' · ');
+        const desc = a.description ? `<div class="news-item-desc">${escHtml(a.description.slice(0, 220))}…</div>` : '';
         return `<div class="news-item">
           <a class="news-item-title" href="${escHtml(a.link)}" target="_blank" rel="noopener noreferrer">${escHtml(a.title)}</a>
           ${desc}
-          <div class="news-item-meta">${date}</div>
+          <div class="news-item-meta">${escHtml(meta)}</div>
         </div>`;
       }).join('');
     } catch (e) {
-      contentEl.innerHTML = `<div class="news-error">Could not load news: ${escHtml(e.message)}</div>`;
+      if (e.message === 'no-key') {
+        contentEl.innerHTML = '<div class="news-error">Configure your Finnhub API key first (go back to the portfolio page).</div>';
+      } else {
+        contentEl.innerHTML = `<div class="news-error">Could not load news: ${escHtml(e.message)}</div>`;
+      }
     }
   }
 
