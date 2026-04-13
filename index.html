@@ -90,6 +90,7 @@
     transition: color .15s, border-color .15s;
   }
   .nav-link:hover { color: var(--accent); border-color: var(--accent); }
+  .nav-link.active { color: var(--accent); border-color: var(--accent); background: var(--accent-glow); }
   .header-right {
     margin-left: auto;
     display: flex;
@@ -1267,7 +1268,7 @@
     newsViewEl.style.display = 'none';
     financeNewsViewEl.style.display = 'none';
     navNewsLink.style.display = 'none';
-    navFinanceLink.style.display = '';
+    navFinanceLink.classList.remove('active');
     if (history.pushState) history.pushState('', document.title, window.location.pathname);
   }
 
@@ -1276,7 +1277,7 @@
     newsViewEl.style.display = 'block';
     financeNewsViewEl.style.display = 'none';
     navNewsLink.style.display = '';
-    navFinanceLink.style.display = 'none';
+    navFinanceLink.classList.remove('active');
 
     const titleEl   = document.getElementById('news-ticker-title');
     const subEl     = document.getElementById('news-ticker-sub');
@@ -1427,7 +1428,7 @@
     newsViewEl.style.display = 'none';
     financeNewsViewEl.style.display = 'block';
     navNewsLink.style.display = '';
-    navFinanceLink.style.display = 'none';
+    navFinanceLink.classList.add('active');
 
     document.querySelectorAll('#cat-tabs .cat-tab').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.cat === category);
