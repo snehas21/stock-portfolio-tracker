@@ -571,6 +571,82 @@
     font-size: 13px;
     color: var(--red);
   }
+
+  /* ── Finance News view ───────────────────────────── */
+  #finance-news-view {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 32px 24px;
+    display: none;
+  }
+  .finance-news-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 28px;
+  }
+  .cat-tabs {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 24px;
+  }
+  .cat-tab {
+    padding: 7px 18px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--muted-light);
+    background: var(--card);
+    cursor: pointer;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  .cat-tab:hover { color: var(--accent); border-color: var(--accent); }
+  .cat-tab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  /* ── Discover Feeds section ──────────────────────── */
+  .discover-section {
+    margin-top: 44px;
+    border-top: 1px solid var(--border);
+    padding-top: 28px;
+  }
+  .discover-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    margin-bottom: 16px;
+  }
+  .discover-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .discover-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .discover-card:hover { border-color: var(--border-hover); box-shadow: 0 4px 12px rgba(99,102,241,.08); }
+  .discover-card-name { font-size: 14px; font-weight: 600; color: var(--fg); margin-bottom: 4px; }
+  .discover-card-desc { font-size: 12px; color: var(--muted); margin-bottom: 10px; line-height: 1.45; }
+  .discover-card-links { display: flex; gap: 8px; flex-wrap: wrap; }
+  .discover-link {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--accent);
+    text-decoration: none;
+    padding: 3px 9px;
+    border: 1px solid rgba(99,102,241,.25);
+    border-radius: 4px;
+    transition: background .15s;
+  }
+  .discover-link:hover { background: var(--accent-glow); }
 </style>
 </head>
 <body>
@@ -582,6 +658,7 @@
       <h1>My Portfolio</h1>
     </a>
     <a class="nav-link" href="#" id="nav-news-link" style="display:none">← Portfolio</a>
+    <a class="nav-link" href="#finance-news" id="nav-finance-link">Finance News</a>
     <div class="header-right">
       <span class="last-updated" id="last-updated"></span>
       <button class="btn-refresh" id="btn-refresh">↻ Refresh Prices</button>
@@ -659,9 +736,30 @@
 <div id="news-view">
   <button class="news-back" id="news-back-btn">← Back to Portfolio</button>
   <div class="news-headline" id="news-ticker-title"></div>
-  <div class="news-sub" id="news-ticker-sub">Latest news from Yahoo Finance</div>
+  <div class="news-sub" id="news-ticker-sub">Latest news · past 30 days</div>
   <div id="news-content" class="news-list">
     <div class="news-loading">Loading news…</div>
+  </div>
+</div>
+
+<!-- Finance News view (market-wide news by category) -->
+<div id="finance-news-view">
+  <div class="finance-news-header">
+    <button class="news-back" id="finance-news-back-btn">← Back to Portfolio</button>
+    <div class="news-headline" style="margin:0">Finance News</div>
+  </div>
+  <div class="cat-tabs" id="cat-tabs">
+    <button class="cat-tab active" data-cat="general">General</button>
+    <button class="cat-tab" data-cat="crypto">Crypto</button>
+    <button class="cat-tab" data-cat="forex">Forex</button>
+    <button class="cat-tab" data-cat="merger">Mergers</button>
+  </div>
+  <div id="finance-news-content" class="news-list">
+    <div class="news-loading">Loading news…</div>
+  </div>
+  <div class="discover-section">
+    <div class="discover-title">Discover Free Sources</div>
+    <div class="discover-grid" id="discover-grid"></div>
   </div>
 </div>
 
@@ -1158,21 +1256,27 @@
   document.getElementById('btn-refresh').addEventListener('click', refreshPrices);
 
   /* ── News view ────────────────────────────────────── */
-  const mainEl     = document.querySelector('main');
-  const newsViewEl = document.getElementById('news-view');
-  const navNewsLink = document.getElementById('nav-news-link');
+  const mainEl          = document.querySelector('main');
+  const newsViewEl      = document.getElementById('news-view');
+  const financeNewsViewEl = document.getElementById('finance-news-view');
+  const navNewsLink     = document.getElementById('nav-news-link');
+  const navFinanceLink  = document.getElementById('nav-finance-link');
 
   function showPortfolioView() {
     mainEl.style.display = '';
     newsViewEl.style.display = 'none';
+    financeNewsViewEl.style.display = 'none';
     navNewsLink.style.display = 'none';
+    navFinanceLink.style.display = '';
     if (history.pushState) history.pushState('', document.title, window.location.pathname);
   }
 
   async function showNewsView(ticker) {
     mainEl.style.display = 'none';
     newsViewEl.style.display = 'block';
+    financeNewsViewEl.style.display = 'none';
     navNewsLink.style.display = '';
+    navFinanceLink.style.display = 'none';
 
     const titleEl   = document.getElementById('news-ticker-title');
     const subEl     = document.getElementById('news-ticker-sub');
@@ -1237,14 +1341,117 @@
   // Handle hash on load / back navigation
   function handleHash() {
     const hash = window.location.hash;
-    const m = hash.match(/^#news\/([^/]+)$/);
-    if (m) {
-      showNewsView(decodeURIComponent(m[1]).toUpperCase());
+    const tickerM  = hash.match(/^#news\/([^/]+)$/);
+    const financeM = hash.match(/^#finance-news(?:\/([^/]*))?$/);
+    if (tickerM) {
+      showNewsView(decodeURIComponent(tickerM[1]).toUpperCase());
+    } else if (financeM) {
+      showFinanceNewsView(financeM[1] || 'general');
     } else {
       showPortfolioView();
     }
   }
   window.addEventListener('popstate', handleHash);
+
+  /* ── Finance News (market-wide) ───────────────────── */
+  const DISCOVER_FEEDS = [
+    { name: 'MarketWatch',     desc: 'Top stories, markets & economy',   site: 'https://www.marketwatch.com',          rss: 'https://feeds.marketwatch.com/marketwatch/topstories/' },
+    { name: 'Reuters Finance', desc: 'Business & financial news wire',    site: 'https://www.reuters.com/finance',      rss: 'https://feeds.reuters.com/reuters/businessNews' },
+    { name: 'CNBC Markets',    desc: 'Breaking finance & market news',    site: 'https://www.cnbc.com/markets/',        rss: 'https://www.cnbc.com/id/100003114/device/rss/rss.html' },
+    { name: 'Seeking Alpha',   desc: 'Market analysis & stock ideas',     site: 'https://seekingalpha.com/market-news', rss: 'https://seekingalpha.com/market-news/rss.xml' },
+    { name: 'The Motley Fool', desc: 'Stock picks & investing advice',    site: 'https://www.fool.com',                 rss: 'https://www.fool.com/feeds/index.aspx' },
+    { name: 'Investing.com',   desc: 'Global markets & economic data',    site: 'https://www.investing.com',            rss: 'https://www.investing.com/rss/news.rss' },
+    { name: 'Yahoo Finance',   desc: 'News, quotes & financials',         site: 'https://finance.yahoo.com',            rss: 'https://finance.yahoo.com/news/rssindex' },
+    { name: "Barron's",        desc: 'In-depth investment analysis',      site: 'https://www.barrons.com',              rss: 'https://www.barrons.com/xml/rss/3_7621.xml' },
+  ];
+
+  async function fetchMarketNews(category) {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error('no-key');
+    const url = `https://finnhub.io/api/v1/news?category=${encodeURIComponent(category)}&token=${apiKey}`;
+    const resp = await fetch(url, { signal: AbortSignal.timeout(12000) });
+    if (resp.status === 401 || resp.status === 403) throw new Error('Invalid Finnhub API key');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const articles = await resp.json();
+    if (!Array.isArray(articles)) throw new Error('Unexpected response from Finnhub');
+    return articles.slice(0, 30).map(a => ({
+      title:       a.headline || '',
+      link:        a.url      || '',
+      pubDate:     a.datetime ? a.datetime * 1000 : null,
+      description: a.summary  || '',
+      source:      a.source   || '',
+    }));
+  }
+
+  function renderDiscoverFeeds() {
+    document.getElementById('discover-grid').innerHTML = DISCOVER_FEEDS.map(f => `
+      <div class="discover-card">
+        <div class="discover-card-name">${escHtml(f.name)}</div>
+        <div class="discover-card-desc">${escHtml(f.desc)}</div>
+        <div class="discover-card-links">
+          <a class="discover-link" href="${escHtml(f.site)}" target="_blank" rel="noopener noreferrer">Visit</a>
+          <a class="discover-link" href="${escHtml(f.rss)}"  target="_blank" rel="noopener noreferrer">RSS</a>
+        </div>
+      </div>`).join('');
+  }
+
+  async function loadFinanceNewsByCategory(category) {
+    const contentEl = document.getElementById('finance-news-content');
+    contentEl.innerHTML = '<div class="news-loading">Fetching latest news…</div>';
+    try {
+      const articles = await fetchMarketNews(category);
+      if (!articles.length) {
+        contentEl.innerHTML = '<div class="news-error">No news found for this category.</div>';
+        return;
+      }
+      contentEl.innerHTML = articles.map(a => {
+        const date = a.pubDate ? new Date(a.pubDate).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '';
+        const meta = [a.source, date].filter(Boolean).join(' · ');
+        const desc = a.description ? `<div class="news-item-desc">${escHtml(a.description.slice(0, 220))}…</div>` : '';
+        return `<div class="news-item">
+          <a class="news-item-title" href="${escHtml(a.link)}" target="_blank" rel="noopener noreferrer">${escHtml(a.title)}</a>
+          ${desc}
+          <div class="news-item-meta">${escHtml(meta)}</div>
+        </div>`;
+      }).join('');
+    } catch (err) {
+      const msg = err?.message;
+      contentEl.innerHTML = msg === 'no-key'
+        ? '<div class="news-error">Set up your Finnhub API key on the portfolio page to load news.</div>'
+        : `<div class="news-error">Could not load news: ${escHtml(msg || 'Unknown error')}</div>`;
+    }
+  }
+
+  function showFinanceNewsView(category = 'general') {
+    mainEl.style.display = 'none';
+    newsViewEl.style.display = 'none';
+    financeNewsViewEl.style.display = 'block';
+    navNewsLink.style.display = '';
+    navFinanceLink.style.display = 'none';
+
+    document.querySelectorAll('#cat-tabs .cat-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.cat === category);
+    });
+    renderDiscoverFeeds();
+    loadFinanceNewsByCategory(category);
+  }
+
+  document.getElementById('finance-news-back-btn').addEventListener('click', showPortfolioView);
+
+  navFinanceLink.addEventListener('click', e => {
+    e.preventDefault();
+    window.location.hash = '#finance-news';
+    showFinanceNewsView('general');
+  });
+
+  document.getElementById('cat-tabs').addEventListener('click', e => {
+    const tab = e.target.closest('.cat-tab');
+    if (!tab) return;
+    const cat = tab.dataset.cat;
+    window.location.hash = `#finance-news/${cat}`;
+    document.querySelectorAll('#cat-tabs .cat-tab').forEach(b => b.classList.toggle('active', b === tab));
+    loadFinanceNewsByCategory(cat);
+  });
 
   /* ── Init ─────────────────────────────────────────── */
   syncKeyUI();
