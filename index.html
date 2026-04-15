@@ -648,6 +648,49 @@
     transition: background .15s;
   }
   .discover-link:hover { background: var(--accent-glow); }
+
+  /* ── View tabs (Holdings / Watchlist) ───────────── */
+  .view-tabs {
+    display: flex;
+    border-bottom: 2px solid var(--border);
+    margin-bottom: 32px;
+  }
+  .view-tab {
+    padding: 10px 24px;
+    border: none;
+    background: none;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--muted);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: color .15s, border-color .15s;
+  }
+  .view-tab:hover { color: var(--fg); }
+  .view-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* ── Watchlist add button ────────────────────────── */
+  .btn-add-watch {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: var(--accent);
+    color: #fff;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background .15s, transform .1s;
+    box-shadow: 0 1px 4px rgba(99,102,241,.3);
+  }
+  .btn-add-watch:hover { background: #4f46e5; transform: translateY(-1px); }
+  .btn-add-watch:active { transform: none; }
 </style>
 </head>
 <body>
@@ -668,68 +711,87 @@
 </header>
 
 <main>
-  <!-- Summary row -->
-  <div class="summary-grid" id="summary-grid">
-    <div class="summary-card">
-      <div class="summary-label">Holdings</div>
-      <div class="summary-value" id="sum-count">–</div>
-      <div class="summary-sub">positions</div>
+  <!-- Main view tabs -->
+  <div class="view-tabs">
+    <button class="view-tab active" data-tab="holdings">My Holdings</button>
+    <button class="view-tab" data-tab="watchlist">Watchlist</button>
+  </div>
+
+  <!-- Holdings tab -->
+  <div id="holdings-view">
+    <!-- Summary row -->
+    <div class="summary-grid" id="summary-grid">
+      <div class="summary-card">
+        <div class="summary-label">Holdings</div>
+        <div class="summary-value" id="sum-count">–</div>
+        <div class="summary-sub">positions</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Total Invested</div>
+        <div class="summary-value" id="sum-invested">–</div>
+      </div>
+      <div class="summary-card">
+        <div class="summary-label">Market Value</div>
+        <div class="summary-value" id="sum-value">–</div>
+      </div>
+      <div class="summary-card" id="sum-pnl-card">
+        <div class="summary-label">Total P&amp;L</div>
+        <div class="summary-value" id="sum-pnl">–</div>
+        <div class="summary-sub" id="sum-pnl-pct"></div>
+      </div>
     </div>
-    <div class="summary-card">
-      <div class="summary-label">Total Invested</div>
-      <div class="summary-value" id="sum-invested">–</div>
+
+    <div id="price-error" class="price-error"></div>
+
+    <div id="api-setup-banner" class="api-setup-banner">
+      <p><strong>A free API key is required for live prices.</strong> Yahoo Finance blocks direct browser
+      requests. Get a free key at <a href="https://finnhub.io" target="_blank" rel="noopener">finnhub.io</a>
+      — sign up takes 30 seconds, no credit card needed. Then paste your key below.</p>
+      <div class="api-setup-row">
+        <input class="api-key-input" id="finnhub-key-input" type="text"
+               placeholder="Paste Finnhub API key…" autocomplete="off" spellcheck="false"/>
+        <button class="btn-save-key" id="btn-save-key">Save &amp; Fetch Prices</button>
+        <button class="btn-clear-key" id="btn-clear-key" style="display:none">✕ Clear key</button>
+      </div>
     </div>
-    <div class="summary-card">
-      <div class="summary-label">Market Value</div>
-      <div class="summary-value" id="sum-value">–</div>
+
+    <!-- Holdings section -->
+    <div class="section-header">
+      <span class="section-label">Holdings</span>
+      <span class="section-divider"></span>
+      <button class="btn-add-holding" id="btn-open-add">+ Add Holding</button>
     </div>
-    <div class="summary-card" id="sum-pnl-card">
-      <div class="summary-label">Total P&amp;L</div>
-      <div class="summary-value" id="sum-pnl">–</div>
-      <div class="summary-sub" id="sum-pnl-pct"></div>
+
+    <div class="table-wrap">
+      <table id="holdings-table">
+        <thead>
+          <tr>
+            <th>Ticker / Name</th>
+            <th>Shares</th>
+            <th>Avg Price</th>
+            <th>Current Price</th>
+            <th>Cost Basis</th>
+            <th>Market Value</th>
+            <th>P&amp;L $</th>
+            <th>P&amp;L %</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="holdings-body">
+          <!-- filled by JS -->
+        </tbody>
+      </table>
     </div>
   </div>
 
-  <div id="price-error" class="price-error"></div>
-
-  <div id="api-setup-banner" class="api-setup-banner">
-    <p><strong>A free API key is required for live prices.</strong> Yahoo Finance blocks direct browser
-    requests. Get a free key at <a href="https://finnhub.io" target="_blank" rel="noopener">finnhub.io</a>
-    — sign up takes 30 seconds, no credit card needed. Then paste your key below.</p>
-    <div class="api-setup-row">
-      <input class="api-key-input" id="finnhub-key-input" type="text"
-             placeholder="Paste Finnhub API key…" autocomplete="off" spellcheck="false"/>
-      <button class="btn-save-key" id="btn-save-key">Save &amp; Fetch Prices</button>
-      <button class="btn-clear-key" id="btn-clear-key" style="display:none">✕ Clear key</button>
+  <!-- Watchlist tab -->
+  <div id="watchlist-view" style="display:none">
+    <div class="section-header">
+      <span class="section-label">Watchlist</span>
+      <span class="section-divider"></span>
+      <button class="btn-add-watch" id="btn-open-add-watch">+ Add Stock</button>
     </div>
-  </div>
-
-  <!-- Holdings section -->
-  <div class="section-header">
-    <span class="section-label">Holdings</span>
-    <span class="section-divider"></span>
-    <button class="btn-add-holding" id="btn-open-add">+ Add Holding</button>
-  </div>
-
-  <div class="table-wrap">
-    <table id="holdings-table">
-      <thead>
-        <tr>
-          <th>Ticker / Name</th>
-          <th>Shares</th>
-          <th>Avg Price</th>
-          <th>Current Price</th>
-          <th>Cost Basis</th>
-          <th>Market Value</th>
-          <th>P&amp;L $</th>
-          <th>P&amp;L %</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody id="holdings-body">
-        <!-- filled by JS -->
-      </tbody>
-    </table>
+    <div id="watchlist-content"></div>
   </div>
 </main>
 
@@ -805,6 +867,32 @@
   </div>
 </div>
 
+<!-- Add to Watchlist modal -->
+<div id="watchlist-modal" class="modal-overlay">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="watchlist-modal-title">
+    <div class="modal-header">
+      <h2 id="watchlist-modal-title">Add to Watchlist</h2>
+      <button class="modal-close" id="watchlist-modal-close">✕</button>
+    </div>
+    <form id="watchlist-form" class="add-form" novalidate>
+      <div class="form-field">
+        <label for="w-ticker">Ticker Symbol</label>
+        <input type="text" id="w-ticker" placeholder="e.g. AAPL, TSLA, BTC-USD" required autocomplete="off"/>
+        <span class="hint">Use Finnhub/Yahoo Finance symbols</span>
+      </div>
+      <div class="form-field">
+        <label for="w-label">Custom Label (optional)</label>
+        <input type="text" id="w-label" placeholder="e.g. Apple Inc." autocomplete="off"/>
+      </div>
+      <p id="watchlist-form-error" class="form-error" style="display:none"></p>
+      <div class="form-actions">
+        <button type="button" class="btn-secondary" id="btn-watchlist-cancel">Cancel</button>
+        <button type="submit" class="btn-primary">Add to Watchlist</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <script>
 (function () {
   'use strict';
@@ -821,6 +909,17 @@
   let holdings = load();   // [{ id, ticker, label, shares, avgPrice }]
   let prices   = {};       // ticker -> { price, name, currency }
   let editId   = null;
+
+  /* ── Watchlist state ──────────────────────────────── */
+  const WATCHLIST_KEY = 'portfolio-watchlist-v1';
+  function loadWatchlist() {
+    try { return JSON.parse(localStorage.getItem(WATCHLIST_KEY) || '[]'); }
+    catch { return []; }
+  }
+  function saveWatchlist(w) { localStorage.setItem(WATCHLIST_KEY, JSON.stringify(w)); }
+  let watchlist   = loadWatchlist(); // [{ id, ticker, label }]
+  let watchPrices = {};              // ticker -> { price, change, changePct, high, low, prevClose } | null
+  let currentTab  = 'holdings';     // 'holdings' | 'watchlist'
 
   /* ── Formatting ───────────────────────────────────── */
   function fmt(n, dec = 2) {
@@ -1254,7 +1353,10 @@
   });
 
   /* ── Refresh button ───────────────────────────────── */
-  document.getElementById('btn-refresh').addEventListener('click', refreshPrices);
+  document.getElementById('btn-refresh').addEventListener('click', async () => {
+    await refreshPrices();
+    if (currentTab === 'watchlist' && watchlist.length) await refreshWatchlistPrices();
+  });
 
   /* ── News view ────────────────────────────────────── */
   const mainEl          = document.querySelector('main');
@@ -1270,6 +1372,9 @@
     navNewsLink.style.display = 'none';
     navFinanceLink.classList.remove('active');
     if (history.pushState) history.pushState('', document.title, window.location.pathname);
+    // Restore active tab visibility
+    document.getElementById('holdings-view').style.display  = currentTab === 'holdings' ? '' : 'none';
+    document.getElementById('watchlist-view').style.display = currentTab === 'watchlist' ? '' : 'none';
   }
 
   async function showNewsView(ticker) {
@@ -1452,6 +1557,203 @@
     window.location.hash = `#finance-news/${cat}`;
     document.querySelectorAll('#cat-tabs .cat-tab').forEach(b => b.classList.toggle('active', b === tab));
     loadFinanceNewsByCategory(cat);
+  });
+
+  /* ── Watchlist ────────────────────────────────────── */
+  async function fetchWatchlistData(tickers) {
+    if (!tickers.length) return {};
+    const unique = [...new Set(tickers.map(t => t.toUpperCase()))];
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error('no-key');
+
+    const settled = await Promise.allSettled(unique.map(async sym => {
+      const resp = await fetch(
+        `https://finnhub.io/api/v1/quote?symbol=${encodeURIComponent(sym)}&token=${apiKey}`,
+        { signal: AbortSignal.timeout(12000) }
+      );
+      if (resp.status === 401 || resp.status === 403) throw new Error('invalid-key');
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (!data.c && !data.pc) throw new Error('unknown-symbol');
+      return { sym, price: data.c, change: data.d, changePct: data.dp, high: data.h, low: data.l, prevClose: data.pc };
+    }));
+
+    for (const r of settled) {
+      if (r.status === 'rejected' && r.reason?.message === 'invalid-key') throw new Error('invalid-key');
+    }
+
+    const map = {};
+    settled.forEach((r, i) => {
+      if (r.status === 'fulfilled') {
+        const v = r.value;
+        map[v.sym] = { price: v.price, change: v.change, changePct: v.changePct, high: v.high, low: v.low, prevClose: v.prevClose };
+      } else {
+        map[unique[i]] = null;
+      }
+    });
+    return map;
+  }
+
+  async function refreshWatchlistPrices() {
+    const tickers = watchlist.map(w => w.ticker);
+    if (!tickers.length) { renderWatchlist(); return; }
+    try {
+      const fetched = await fetchWatchlistData(tickers);
+      tickers.forEach(t => { if (fetched[t] === undefined) fetched[t] = null; });
+      watchPrices = fetched;
+    } catch (e) {
+      tickers.forEach(t => { if (watchPrices[t] === undefined) watchPrices[t] = null; });
+    }
+    renderWatchlist();
+  }
+
+  function renderWatchlist() {
+    const contentEl = document.getElementById('watchlist-content');
+    if (!contentEl) return;
+
+    if (!watchlist.length) {
+      contentEl.innerHTML = `<div class="table-wrap"><table><tbody><tr><td colspan="8">
+        <div class="empty-state">
+          <div class="empty-icon">👁</div>
+          <div class="empty-title">Watchlist is empty</div>
+          <div class="empty-sub">Click "+ Add Stock" to track a stock's price and daily stats.</div>
+        </div></td></tr></tbody></table></div>`;
+      return;
+    }
+
+    contentEl.innerHTML = `<div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Ticker / Name</th>
+          <th>Price</th>
+          <th>Day Change</th>
+          <th>Day Change %</th>
+          <th>Day High</th>
+          <th>Day Low</th>
+          <th>Prev. Close</th>
+          <th></th>
+        </tr></thead>
+        <tbody id="watchlist-body"></tbody>
+      </table>
+    </div>`;
+
+    const tbody = document.getElementById('watchlist-body');
+    watchlist.forEach(w => {
+      const sym = w.ticker;
+      const q   = watchPrices[sym];
+      const nameStr = w.label || sym;
+
+      let priceCell, changeCell, changePctCell, highCell, lowCell, prevCloseCell;
+
+      if (q === undefined) {
+        const loading = `<span class="badge-loading">Loading…</span>`;
+        priceCell = changeCell = changePctCell = highCell = lowCell = prevCloseCell = loading;
+      } else if (q === null) {
+        priceCell = `<span style="color:var(--muted);font-size:12px">N/A</span>`;
+        changeCell = changePctCell = highCell = lowCell = prevCloseCell = '–';
+      } else {
+        priceCell = fmtCurrency(q.price);
+        const cls  = q.change >= 0 ? 'pnl-pos' : 'pnl-neg';
+        const sign = q.change >= 0 ? '+' : '';
+        changeCell    = `<span class="${cls}">${sign}${fmtCurrency(q.change)}</span>`;
+        changePctCell = `<span class="${cls}">${sign}${fmt(q.changePct)}%</span>`;
+        highCell      = fmtCurrency(q.high);
+        lowCell       = fmtCurrency(q.low);
+        prevCloseCell = fmtCurrency(q.prevClose);
+      }
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><div class="ticker-cell">
+          <a class="ticker-sym-link" href="#news/${escHtml(sym)}" data-ticker="${escHtml(sym)}">${escHtml(sym)}</a>
+          <span class="ticker-name">${escHtml(nameStr)}</span>
+        </div></td>
+        <td style="text-align:right">${priceCell}</td>
+        <td style="text-align:right">${changeCell}</td>
+        <td style="text-align:right">${changePctCell}</td>
+        <td style="text-align:right">${highCell}</td>
+        <td style="text-align:right">${lowCell}</td>
+        <td style="text-align:right">${prevCloseCell}</td>
+        <td><div class="actions-cell">
+          <button class="btn-del" data-wid="${escHtml(w.id)}">Remove</button>
+        </div></td>`;
+      tbody.appendChild(tr);
+    });
+
+    tbody.querySelectorAll('.btn-del').forEach(btn => {
+      btn.addEventListener('click', () => {
+        watchlist = watchlist.filter(w => w.id !== btn.dataset.wid);
+        saveWatchlist(watchlist);
+        renderWatchlist();
+      });
+    });
+
+    tbody.addEventListener('click', e => {
+      const link = e.target.closest('.ticker-sym-link');
+      if (!link) return;
+      e.preventDefault();
+      const ticker = link.dataset.ticker;
+      if (ticker) { window.location.hash = `#news/${ticker}`; showNewsView(ticker); }
+    });
+  }
+
+  function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.view-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    document.getElementById('holdings-view').style.display  = tab === 'holdings' ? '' : 'none';
+    document.getElementById('watchlist-view').style.display = tab === 'watchlist' ? '' : 'none';
+    if (tab === 'watchlist') {
+      renderWatchlist();
+      const needsFetch = watchlist.some(w => watchPrices[w.ticker] === undefined);
+      if (needsFetch && watchlist.length) refreshWatchlistPrices();
+    }
+  }
+
+  document.querySelectorAll('.view-tab').forEach(tab => {
+    tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+  });
+
+  /* ── Watchlist modal ──────────────────────────────── */
+  const watchModal  = document.getElementById('watchlist-modal');
+  const watchForm   = document.getElementById('watchlist-form');
+  const watchErrEl  = document.getElementById('watchlist-form-error');
+
+  function openWatchModal() {
+    watchForm.reset();
+    watchErrEl.style.display = 'none';
+    watchModal.style.display = 'flex';
+    document.getElementById('w-ticker').focus();
+  }
+  function closeWatchModal() { watchModal.style.display = 'none'; watchForm.reset(); }
+
+  document.getElementById('btn-open-add-watch').addEventListener('click', openWatchModal);
+  document.getElementById('watchlist-modal-close').addEventListener('click', closeWatchModal);
+  document.getElementById('btn-watchlist-cancel').addEventListener('click', closeWatchModal);
+  watchModal.addEventListener('click', e => { if (e.target === watchModal) closeWatchModal(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && watchModal.style.display !== 'none') closeWatchModal();
+  });
+
+  watchForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    watchErrEl.style.display = 'none';
+    const ticker = document.getElementById('w-ticker').value.trim().toUpperCase();
+    const label  = document.getElementById('w-label').value.trim();
+    if (!ticker) {
+      watchErrEl.textContent = 'Ticker symbol is required.';
+      watchErrEl.style.display = 'block';
+      return;
+    }
+    if (watchlist.find(w => w.ticker === ticker)) {
+      watchErrEl.textContent = `${ticker} is already on your watchlist.`;
+      watchErrEl.style.display = 'block';
+      return;
+    }
+    watchlist.push({ id: Date.now().toString(), ticker, label });
+    saveWatchlist(watchlist);
+    closeWatchModal();
+    renderWatchlist();
+    if (watchlist.some(w => watchPrices[w.ticker] === undefined)) refreshWatchlistPrices();
   });
 
   /* ── Init ─────────────────────────────────────────── */
