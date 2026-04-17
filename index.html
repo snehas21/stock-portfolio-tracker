@@ -691,6 +691,21 @@
   }
   .btn-add-watch:hover { background: #4f46e5; transform: translateY(-1px); }
   .btn-add-watch:active { transform: none; }
+
+  /* ── Analyst rating badges ───────────────────────── */
+  .badge-analyst {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .badge-strong-buy  { background: rgba(16,185,129,.18); color: #047857; }
+  .badge-buy         { background: rgba(16,185,129,.09); color: #10b981; }
+  .badge-hold        { background: rgba(245,158,11,.12); color: #d97706; }
+  .badge-sell        { background: rgba(239,68,68,.09);  color: #ef4444; }
+  .badge-strong-sell { background: rgba(239,68,68,.18);  color: #dc2626; }
 </style>
 </head>
 <body>
@@ -771,6 +786,8 @@
             <th>Avg Price</th>
             <th>Current Price</th>
             <th>Day Change</th>
+            <th>Target Price</th>
+            <th>Analyst Rating</th>
             <th>Cost Basis</th>
             <th>Market Value</th>
             <th>P&amp;L $</th>
@@ -908,7 +925,8 @@
   function save(h) { localStorage.setItem(STORAGE_KEY, JSON.stringify(h)); }
 
   let holdings = load();   // [{ id, ticker, label, shares, avgPrice }]
-  let prices   = {};       // ticker -> { price, name, currency }
+  let prices      = {};    // ticker -> { price, change, changePct, name, currency }
+  let analystData = {};    // ticker -> { targetMean, targetHigh, targetLow, sentiment } | null
   let editId   = null;
 
   /* ── Watchlist state ──────────────────────────────── */
@@ -1025,6 +1043,64 @@
     return data?.name || null;
   }
 
+  /* ── Finnhub analyst data (price target + recommendation) ── */
+  async function fetchAnalystData(tickers) {
+    const apiKey = getApiKey();
+    if (!apiKey) return {};
+    const unique = [...new Set(tickers.map(t => t.toUpperCase()))];
+
+    const settled = await Promise.allSettled(unique.map(async sym => {
+      const [ptRes, recRes] = await Promise.allSettled([
+        fetch(`https://finnhub.io/api/v1/stock/price-target?symbol=${encodeURIComponent(sym)}&token=${apiKey}`, { signal: AbortSignal.timeout(10000) }),
+        fetch(`https://finnhub.io/api/v1/stock/recommendation?symbol=${encodeURIComponent(sym)}&token=${apiKey}`, { signal: AbortSignal.timeout(10000) }),
+      ]);
+
+      let targetMean = null, targetHigh = null, targetLow = null;
+      if (ptRes.status === 'fulfilled' && ptRes.value.ok) {
+        const d = await ptRes.value.json();
+        targetMean = d.targetMean || null;
+        targetHigh = d.targetHigh || null;
+        targetLow  = d.targetLow  || null;
+      }
+
+      let sentiment = null;
+      if (recRes.status === 'fulfilled' && recRes.value.ok) {
+        const recs = await recRes.value.json();
+        if (Array.isArray(recs) && recs.length) {
+          const r = recs[0];
+          const total = (r.strongBuy||0) + (r.buy||0) + (r.hold||0) + (r.sell||0) + (r.strongSell||0);
+          if (total > 0) {
+            const score = ((r.strongBuy||0)*1 + (r.buy||0)*2 + (r.hold||0)*3 + (r.sell||0)*4 + (r.strongSell||0)*5) / total;
+            if      (score < 1.5) sentiment = 'Strong Buy';
+            else if (score < 2.5) sentiment = 'Buy';
+            else if (score < 3.5) sentiment = 'Hold';
+            else if (score < 4.5) sentiment = 'Sell';
+            else                  sentiment = 'Strong Sell';
+          }
+        }
+      }
+      return { sym, targetMean, targetHigh, targetLow, sentiment };
+    }));
+
+    const map = {};
+    settled.forEach((r, i) => {
+      if (r.status === 'fulfilled') {
+        const v = r.value;
+        map[v.sym] = { targetMean: v.targetMean, targetHigh: v.targetHigh, targetLow: v.targetLow, sentiment: v.sentiment };
+      } else {
+        map[unique[i]] = null;
+      }
+    });
+    return map;
+  }
+
+  async function refreshAnalystData() {
+    const tickers = [...new Set(holdings.map(h => h.ticker.toUpperCase()))];
+    if (!tickers.length || !getApiKey()) return;
+    const fetched = await fetchAnalystData(tickers);
+    tickers.forEach(t => { analystData[t] = fetched[t] !== undefined ? fetched[t] : null; });
+    renderTable();
+  }
 
   function renderSummary() {
     const count = holdings.length;
@@ -1072,7 +1148,7 @@
     if (!holdings.length) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
-      td.colSpan = 10;
+      td.colSpan = 12;
       td.innerHTML = `
         <div class="empty-state">
           <div class="empty-icon">📊</div>
@@ -1139,6 +1215,33 @@
         tdDayChange.innerHTML = `<span class="${cls}">${sign}${fmtCurrency(p.change)}<br><small style="font-weight:500">${sign}${fmt(p.changePct)}%</small></span>`;
       }
 
+      // Analyst target price & sentiment
+      const ad = analystData[sym];
+      const tdTarget = document.createElement('td');
+      tdTarget.style.textAlign = 'right';
+      if (ad === undefined) {
+        tdTarget.innerHTML = `<span class="badge-loading">Loading…</span>`;
+      } else if (!ad || ad.targetMean == null) {
+        tdTarget.textContent = '–';
+      } else {
+        const diff = currentPrice != null ? ((ad.targetMean - currentPrice) / currentPrice * 100) : null;
+        const diffHtml = diff != null
+          ? `<br><small class="${diff >= 0 ? 'pnl-pos' : 'pnl-neg'}" style="font-weight:500">${diff >= 0 ? '+' : ''}${fmt(diff)}% upside</small>`
+          : '';
+        tdTarget.innerHTML = fmtCurrency(ad.targetMean) + diffHtml;
+      }
+
+      const tdRating = document.createElement('td');
+      tdRating.style.textAlign = 'right';
+      if (ad === undefined) {
+        tdRating.innerHTML = `<span class="badge-loading">Loading…</span>`;
+      } else if (!ad || ad.sentiment == null) {
+        tdRating.textContent = '–';
+      } else {
+        const badgeCls = { 'Strong Buy': 'badge-strong-buy', 'Buy': 'badge-buy', 'Hold': 'badge-hold', 'Sell': 'badge-sell', 'Strong Sell': 'badge-strong-sell' }[ad.sentiment] || '';
+        tdRating.innerHTML = `<span class="badge-analyst ${badgeCls}">${escHtml(ad.sentiment)}</span>`;
+      }
+
       // Cost basis
       const tdCost = cell(fmtCurrency(cost));
 
@@ -1166,7 +1269,7 @@
         <button class="btn-del" data-id="${h.id}">Remove</button>
       </div>`;
 
-      tr.append(tdTicker, tdShares, tdAvg, tdCur, tdDayChange, tdCost, tdMV, tdPnl, tdPct, tdAct);
+      tr.append(tdTicker, tdShares, tdAvg, tdCur, tdDayChange, tdTarget, tdRating, tdCost, tdMV, tdPnl, tdPct, tdAct);
       tbody.append(tr);
     });
 
@@ -1231,6 +1334,7 @@
 
     renderTable();
     renderSummary();
+    refreshAnalystData(); // fetch in background, re-renders when ready
   }
 
   /* ── CRUD ─────────────────────────────────────────── */
