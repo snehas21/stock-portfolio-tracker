@@ -770,6 +770,7 @@
             <th>Shares</th>
             <th>Avg Price</th>
             <th>Current Price</th>
+            <th>Day Change</th>
             <th>Cost Basis</th>
             <th>Market Value</th>
             <th>P&amp;L $</th>
@@ -957,7 +958,7 @@
       const data = await resp.json();
       // Finnhub returns all-zeros when symbol is unknown
       if (!data.c && !data.pc) throw new Error(`unknown-symbol`);
-      return { sym, price: data.c, currency: 'USD' };
+      return { sym, price: data.c, change: data.d, changePct: data.dp, currency: 'USD' };
     }));
 
     // Propagate auth errors immediately
@@ -971,7 +972,7 @@
     let anySuccess = false;
     settled.forEach((r, i) => {
       if (r.status === 'fulfilled') {
-        map[r.value.sym] = { price: r.value.price, name: null, currency: 'USD' };
+        map[r.value.sym] = { price: r.value.price, change: r.value.change, changePct: r.value.changePct, name: null, currency: 'USD' };
         anySuccess = true;
       } else {
         map[unique[i]] = null; // symbol-level failure → show N/A
@@ -1071,7 +1072,7 @@
     if (!holdings.length) {
       const tr = document.createElement('tr');
       const td = document.createElement('td');
-      td.colSpan = 9;
+      td.colSpan = 10;
       td.innerHTML = `
         <div class="empty-state">
           <div class="empty-icon">📊</div>
@@ -1125,6 +1126,19 @@
         tdCur.textContent = fmtCurrency(currentPrice);
       }
 
+      // Day change
+      const tdDayChange = document.createElement('td');
+      tdDayChange.style.textAlign = 'right';
+      if (p === undefined) {
+        tdDayChange.innerHTML = `<span class="badge-loading">Loading…</span>`;
+      } else if (p === null || p.change == null) {
+        tdDayChange.textContent = '–';
+      } else {
+        const cls  = p.change >= 0 ? 'pnl-pos' : 'pnl-neg';
+        const sign = p.change >= 0 ? '+' : '';
+        tdDayChange.innerHTML = `<span class="${cls}">${sign}${fmtCurrency(p.change)}<br><small style="font-weight:500">${sign}${fmt(p.changePct)}%</small></span>`;
+      }
+
       // Cost basis
       const tdCost = cell(fmtCurrency(cost));
 
@@ -1152,7 +1166,7 @@
         <button class="btn-del" data-id="${h.id}">Remove</button>
       </div>`;
 
-      tr.append(tdTicker, tdShares, tdAvg, tdCur, tdCost, tdMV, tdPnl, tdPct, tdAct);
+      tr.append(tdTicker, tdShares, tdAvg, tdCur, tdDayChange, tdCost, tdMV, tdPnl, tdPct, tdAct);
       tbody.append(tr);
     });
 
